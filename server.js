@@ -1,19 +1,92 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import pkg from "pg";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
 
 dotenv.config();
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Route test
+// Connexion à la base Postgres (Supabase)
+const { Pool } = pkg;
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+// Middleware d’authentification
+function auth() {
+  return (req, res, next) => {
+    const header = req.headers["authorization"];
+    if (!header) return res.status(401).json({ error: "Token manquant" });
+
+    const token = header.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Token invalide" });
+
+    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+      if (err) return res.status(403).json({ error: "Token invalide" });
+      req.user = user;
+      next();
+    });
+  };
+}
+
+// ==========================
+// ROUTE TEST
+// ==========================
 app.get("/", (req, res) => {
   res.json({ ok: true, name: "Marto API" });
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Marto API running on port ${port}`));
+// ==========================
+// AUTHENTIFICATION
+// ==========================
+app.post("/auth/register", async (req, res) => {
+  const { full_name, email, phone, password, role } = req.body;
+  if (!email || !password || !role) {
+    return res.status(400).json({ error: "Champs manquants" });
+  }
+  try {
+    const hashed = await bcrypt.hash(password, 10);
+    const { rows } = await pool.query(
+      `insert into users(full_name, email, phone, password_hash, role)
+       values($1,$2,$3,$4,$5) returning id, full_name, email, role`,
+      [full_name, email, phone, hashed, role]
+    );
+    const user = rows[0];
+    const token = jwt.sign(user, process.env.JWT_SECRET);
+    res.json({ token, user });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erreur lors de l'inscription" });
+  }
+});
+
+app.post("/auth/login", async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const { rows } = await pool.query("select * from users where email=$1", [email]);
+    if (!rows.length) return res.status(400).json({ error: "Utilisateur introuvable" });
+
+    const user = rows[0];
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(400).json({ error: "Mot de passe incorrect" });
+
+    const payload = { id: user.id, email: user.email, role: user.role };
+    const token = jwt.sign(payload, process.env.JWT_SECRET);
+    res.json({ token, user: payload });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erreur lors de la connexion" });
+  }
+});
+
+app.get("/me", auth(), (req, res) => {
+  res.json({ user: req.user });
+});
 
 // ==========================
 // PRODUITS (par commerçants)
@@ -142,3 +215,7 @@ app.post("/deliveries/:id/complete", auth(), async (req, res) => {
     res.status(500).json({ error: "Erreur lors de la livraison" });
   }
 });
+
+// Lancement du serveur
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`Marto API running on port ${port}`));
