@@ -17,6 +17,9 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+// 🔎 Debug : afficher l’URL (attention, ça montre aussi le mot de passe en clair, à retirer en prod)
+console.log("🔌 DATABASE_URL utilisé :", process.env.DATABASE_URL);
+
 // Middleware d’authentification
 function auth() {
   return (req, res, next) => {
@@ -60,8 +63,8 @@ app.post("/auth/register", async (req, res) => {
     const token = jwt.sign(user, process.env.JWT_SECRET);
     res.json({ token, user });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Erreur lors de l'inscription" });
+    console.error("❌ Erreur SQL register:", e);
+    res.status(500).json({ error: "Erreur lors de l'inscription", details: e.message });
   }
 });
 
@@ -79,8 +82,8 @@ app.post("/auth/login", async (req, res) => {
     const token = jwt.sign(payload, process.env.JWT_SECRET);
     res.json({ token, user: payload });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Erreur lors de la connexion" });
+    console.error("❌ Erreur SQL login:", e);
+    res.status(500).json({ error: "Erreur lors de la connexion", details: e.message });
   }
 });
 
@@ -104,8 +107,8 @@ app.post("/products", auth(), async (req, res) => {
     );
     res.status(201).json(rows[0]);
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Erreur lors de la création du produit" });
+    console.error("❌ Erreur SQL produits:", e);
+    res.status(500).json({ error: "Erreur lors de la création du produit", details: e.message });
   }
 });
 
@@ -114,8 +117,8 @@ app.get("/products", async (req, res) => {
     const { rows } = await pool.query("select * from products order by created_at desc");
     res.json(rows);
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Erreur lors de la récupération des produits" });
+    console.error("❌ Erreur SQL get products:", e);
+    res.status(500).json({ error: "Erreur lors de la récupération des produits", details: e.message });
   }
 });
 
@@ -160,8 +163,8 @@ app.post("/orders", auth(), async (req, res) => {
 
     res.status(201).json(order);
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Erreur lors de la création de la commande" });
+    console.error("❌ Erreur SQL commande:", e);
+    res.status(500).json({ error: "Erreur lors de la création de la commande", details: e.message });
   }
 });
 
@@ -183,13 +186,12 @@ app.post("/deliveries/:order_id/assign", auth(), async (req, res) => {
       [order_id, req.user.id]
     );
 
-    // Mettre à jour la commande
     await pool.query("update orders set status='assigned' where id=$1", [order_id]);
 
     res.json(rows[0]);
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Erreur lors de l'assignation de la livraison" });
+    console.error("❌ Erreur SQL assign livraison:", e);
+    res.status(500).json({ error: "Erreur lors de l'assignation de la livraison", details: e.message });
   }
 });
 
@@ -206,14 +208,13 @@ app.post("/deliveries/:id/complete", auth(), async (req, res) => {
     );
     if (!rows.length) return res.status(404).json({ error: "Livraison introuvable" });
 
-    // Mettre à jour la commande associée
     await pool.query("update orders set status='delivered' where id=$1", [rows[0].order_id]);
 
     res.json(rows[0]);
-} catch (e) {
-  console.error("Erreur SQL:", e);   // 🔎 ajoute ça
-  res.status(500).json({ error: "Erreur lors de l'inscription", details: e.message });
-}
+  } catch (e) {
+    console.error("❌ Erreur SQL complete livraison:", e);
+    res.status(500).json({ error: "Erreur lors de la livraison", details: e.message });
+  }
 });
 
 // Lancement du serveur
