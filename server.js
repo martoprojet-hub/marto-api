@@ -210,10 +210,10 @@ app.post("/deliveries/:id/complete", auth(), async (req, res) => {
     await pool.query("update orders set status='delivered' where id=$1", [rows[0].order_id]);
 
     res.json(rows[0]);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Erreur lors de la livraison" });
-  }
+} catch (e) {
+  console.error("Erreur SQL:", e);   // 🔎 ajoute ça
+  res.status(500).json({ error: "Erreur lors de l'inscription", details: e.message });
+}
 });
 
 // Lancement du serveur
