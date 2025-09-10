@@ -4,6 +4,9 @@ import dotenv from "dotenv";
 import pkg from "pg";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 
 dotenv.config();
 const app = express();
@@ -17,8 +20,18 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// 🔎 Debug : afficher l’URL (attention, ça montre aussi le mot de passe en clair, à retirer en prod)
-console.log("🔌 DATABASE_URL utilisé :", process.env.DATABASE_URL);
+// ✅ Config dossier uploads
+const UPLOADS_DIR = "./uploads";
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR);
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+  filename: (req, file, cb) =>
+    cb(null, Date.now() + path.extname(file.originalname)),
+});
+const upload = multer({ storage });
 
 // Middleware d’authentification
 function auth() {
@@ -94,17 +107,20 @@ app.get("/me", auth(), (req, res) => {
 // ==========================
 // PRODUITS (par commerçants)
 // ==========================
-app.post("/products", auth(), async (req, res) => {
+app.post("/products", auth(), upload.single("image"), async (req, res) => {
   if (req.user.role !== "commercant") {
     return res.status(403).json({ error: "Seuls les commerçants peuvent créer des produits" });
   }
   try {
-    const { name, description, price, stock, image_url } = req.body;
+    const { name, description, price, stock } = req.body;
+    const image_url = req.file ? `/uploads/${req.file.filename}` : null;
+
     const { rows } = await pool.query(
       `insert into products(merchant_id, name, description, price, stock, image_url)
        values($1,$2,$3,$4,$5,$6) returning *`,
-      [req.user.id, name, description, price, stock || 0, image_url || null]
+      [req.user.id, name, description, price, stock || 0, image_url]
     );
+
     res.status(201).json(rows[0]);
   } catch (e) {
     console.error("❌ Erreur SQL produits:", e);
@@ -217,6 +233,9 @@ app.post("/deliveries/:id/complete", auth(), async (req, res) => {
   }
 });
 
+// Route statique pour servir les images
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
 // Lancement du serveur
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Marto API running on port ${port}`));
+app.listen(port, () => console.log(`🚀 Marto API running on port ${port}`));
